@@ -1,0 +1,10 @@
+# Checkpoints y modelos
+src/checkpoints/
+src/models/
+
+# Logs de entrenamiento
+src/tensorboard/
+src/logs/
+
+# Python cache
+__pycache__/
