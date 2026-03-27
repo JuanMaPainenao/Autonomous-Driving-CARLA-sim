@@ -1,7 +1,7 @@
 # Comparación de Funciones de Recompensa — CarlaEnv
 
 ![Descripción de la imagen](../../images/Entrenamiento.png)
-Imagen de la derecha representa el tiempo del episodio. La imagen de la izquierda representa la recompensa por episodio.
+Imagen de la derecha representa el tiempo por episodio. La imagen de la izquierda representa la recompensa por episodio.
 
 ## Primer modelo — 5 componentes
 
@@ -70,8 +70,11 @@ V2 loguea `r_progress` y `r_stall` como columnas adicionales en el CSV. En V1 so
 # Conclusiones
 
 Sabiendo que con MAX_STEPS = 2000 y asumiendo el caso ideal sin colisión ni truncado temprano:
+
 v1 — Máximo teórico por episodio: 2.0 × 2000 = 4000
+
 v2 — Máximo teórico por episodio: 7.0 × 2000 = 14000
+
 v2 — Máximo realista por episodio: 2.56 × 2000 ≈ 5120
 
 Se determina entonces que el modelo V1 es inferior y estan mal determinadas las recompensas, ya que al terminar el entrenamiento, el ultimo episodio termino con recompensa negativa. Observando en CARLA se veia el vehiculo parado, ya que de esta forma se evitaba el castigo que le daba una colision.
