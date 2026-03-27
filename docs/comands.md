@@ -29,7 +29,7 @@ watch -n 1 nvidia-smi
 
 ---
 
-## 🔑 Variables de entorno
+## Variables de entorno
 
 ```bash
 export WANDB_API_KEY=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
