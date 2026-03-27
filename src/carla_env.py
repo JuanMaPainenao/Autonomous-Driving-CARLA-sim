@@ -112,6 +112,7 @@ class CarlaEnv(gym.Env):
         self.global_step = 0
         self._reward_accum = {
             'r_speed': 0.0, 'r_orientation': 0.0,
+            'r_progress': 0.0, 'r_stall': 0.0,
             'r_lane': 0.0, 'r_collision': 0.0, 'r_offroad': 0.0,
             'r_total': 0.0,
         }
@@ -125,7 +126,7 @@ class CarlaEnv(gym.Env):
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
             'global_step', 'episode', 'step_in_ep',
-            'avg_r_speed', 'avg_r_orientation',
+            'avg_r_speed', 'avg_r_orientation', 'avg_r_progress', 'avg_r_stall',
             'avg_r_lane', 'avg_r_collision', 'avg_r_offroad',
             'avg_r_total', 'speed_kmh',
         ])
@@ -250,16 +251,13 @@ class CarlaEnv(gym.Env):
         """
         Componentes:
         1. r_speed: gaussiana centrada en TARGET_SPEED_KMH.
-            Si el auto está casi parado (< 2 km/h), penalidad directa de -1.0
-            para eliminar el óptimo local de "quedarse quieto".
+            Si el auto está casi parado (< 2 km/h), penalidad directa fuerte (-5.0).
         2. r_orientation: producto punto entre el forward vector del
-            vehículo y el del waypoint más cercano. Solo se premia si
-            el auto se mueve (> 5 km/h), evitando que el agente cobre
-            recompensa por simplemente existir apuntando bien.
-        3. r_lane: penalidad si se cruzó una línea de carril.
-        4. r_collision: penalidad si hubo colisión (termina episodio).
-        5. r_offroad: penalidad si el vehículo está fuera del carril
-            de conducción (waypoint.lane_type != Driving).
+            vehículo y el del waypoint más cercano.
+        3. r_progress: incentivo de distancia recorrida entre pasos.
+        4. r_lane: penalidad por invasión de carril.
+        5. r_collision: penalidad por colisión y fin de episodio.
+        6. r_offroad: penalidad por salir del carril de conducción.
 
         Retorna: (reward_total, dict_componentes, terminated)
         """
@@ -269,11 +267,13 @@ class CarlaEnv(gym.Env):
         # 1. Recompensa por velocidad (gaussiana + penalidad por quietud)
         speed_diff = speed - TARGET_SPEED_KMH
         if speed < 2.0:
-            r_speed = -1.0
+            r_speed = -5.0
+            self.stall_steps += 1
         else:
             r_speed = R_SPEED_MAX * math.exp(-(speed_diff / 20.0) ** 2)
+            self.stall_steps = 0
 
-        # 2. Recompensa por orientación (solo si se mueve)
+        # 2. Recompensa por orientación (solo si va a una velocidad significativa)
         vehicle_transform = self.vehicle.get_transform()
         waypoint = self.map.get_waypoint(
             vehicle_transform.location, project_to_road=True
@@ -288,33 +288,50 @@ class CarlaEnv(gym.Env):
         else:
             r_orientation = 0.0
 
-        # 3. Penalidad por invasión de carril
+        # 3. Recompensa por progreso (distancia al anterior frame)
+        r_progress = 0.0
+        current_loc = vehicle_transform.location
+        if self.prev_location is not None:
+            dx = current_loc.distance(self.prev_location)
+            r_progress = 1.0 * min(dx, 5.0)
+        self.prev_location = current_loc
+
+        # 4. Penalidad por invasión de carril
         r_lane = R_LANE_PENALTY if self.lane_invasion_flag else 0.0
         self.lane_invasion_flag = False
 
-        # 4. Penalidad por colisión
+        # 5. Penalidad por colisión
         r_collision = 0.0
         if self.collision_flag:
             r_collision = R_COLLISION_PENALTY
             terminated = True
 
-        # 5. Penalidad por estar fuera de ruta
+        # 6. Penalidad por offroad
         r_offroad = 0.0
         if waypoint.lane_type != carla.LaneType.Driving:
             r_offroad = R_OFFROAD_PENALTY
 
-        total = r_speed + r_orientation + r_lane + r_collision + r_offroad
+        # 7. Corte por stall prolongado
+        r_stall = 0.0
+        if self.stall_steps >= 30:
+            terminated = True
+            r_stall = -3.0
+
+        total = (
+            r_speed + r_orientation + r_progress + r_lane
+            + r_collision + r_offroad + r_stall
+        )
 
         components = {
             'r_speed': r_speed,
             'r_orientation': r_orientation,
+            'r_progress': r_progress,
+            'r_stall': r_stall,
             'r_lane': r_lane,
             'r_collision': r_collision,
             'r_offroad': r_offroad,
         }
         return total, components, terminated
-
-
     def _log_rewards(self, components, total):
         """
         Acumula componentes de recompensa y escribe promedios al CSV
@@ -333,6 +350,8 @@ class CarlaEnv(gym.Env):
                 self.global_step, self.episode_count, self.step_count,
                 round(self._reward_accum['r_speed'] / n, 4),
                 round(self._reward_accum['r_orientation'] / n, 4),
+                round(self._reward_accum['r_progress'] / n, 4),
+                round(self._reward_accum['r_stall'] / n, 4),
                 round(self._reward_accum['r_lane'] / n, 4),
                 round(self._reward_accum['r_collision'] / n, 4),
                 round(self._reward_accum['r_offroad'] / n, 4),
@@ -366,6 +385,8 @@ class CarlaEnv(gym.Env):
         self.lane_invasion_flag = False
         self.front_camera = None
         self.step_count = 0
+        self.stall_steps = 0
+        self.prev_location = None
         self._ep_reward = 0.0
         self.episode_count += 1
 

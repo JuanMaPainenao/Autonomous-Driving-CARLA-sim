@@ -1,6 +1,7 @@
 # Checkpoints y modelos
 src/checkpoints/
 src/models/
+checkpoints/
 
 # Logs de entrenamiento
 src/tensorboard/
