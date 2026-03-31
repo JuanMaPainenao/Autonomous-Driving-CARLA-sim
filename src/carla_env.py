@@ -39,15 +39,18 @@ import carla
 #  CONFIGURACIÓN
 # ═══════════════════════════════════════════════════════════════════
 
-IM_WIDTH = 160          
-IM_HEIGHT = 120        
+IM_WIDTH = 640          
+IM_HEIGHT = 480        
 IM_CHANNELS = 3         
-FOV = 110              
+FOV = 110    
+
+OBS_WIDTH = 160
+OBS_HEIGHT = 120
 
 FIXED_DELTA = 0.05      
 MAX_STEPS = 2000       
 
-TARGET_SPEED_KMH = 40
+TARGET_SPEED_KMH = 30
 
 R_SPEED_MAX = 1.0            
 R_ORIENTATION_MAX = 1.0      
@@ -94,7 +97,7 @@ class CarlaEnv(gym.Env):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255,
-            shape=(IM_HEIGHT, IM_WIDTH, IM_CHANNELS),
+            shape=(OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS),
             dtype=np.uint8,
         )
         self.action_space = spaces.Discrete(len(DISCRETE_ACTIONS))
@@ -233,8 +236,11 @@ class CarlaEnv(gym.Env):
 
     def _process_image(self, image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
-        array = array.reshape((IM_HEIGHT, IM_WIDTH, 4))  # BGRA
-        self.front_camera = array[:, :, :3]               # BGR (sin alpha)
+        array = array.reshape((IM_HEIGHT, IM_WIDTH, 4))       # BGRA a 640×480
+        bgr = array[:, :, :3]                                  # Quitar canal alpha
+        # cv2.resize(src, (ancho, alto)) — redimensiona la imagen al tamaño destino
+        # INTER_AREA es el mejor método para reducir tamaño (promedia píxeles)
+        self.front_camera = cv2.resize(bgr, (OBS_WIDTH, OBS_HEIGHT), interpolation=cv2.INTER_AREA)
 
     def _on_collision(self, event):
         self.collision_flag = True
@@ -414,7 +420,7 @@ class CarlaEnv(gym.Env):
         if self.front_camera is None:
             # Fallback: imagen negra si la cámara no respondió
             self.front_camera = np.zeros(
-                (IM_HEIGHT, IM_WIDTH, IM_CHANNELS), dtype=np.uint8
+                (OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8
             )
 
         return self.front_camera.copy(), {}
@@ -449,7 +455,7 @@ class CarlaEnv(gym.Env):
         if self.front_camera is not None:
             obs = self.front_camera.copy()
         else:
-            obs = np.zeros((IM_HEIGHT, IM_WIDTH, IM_CHANNELS), dtype=np.uint8)
+            obs = np.zeros((OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8)
 
         # 4. Calcular recompensa
         reward, components, terminated = self._compute_reward()
