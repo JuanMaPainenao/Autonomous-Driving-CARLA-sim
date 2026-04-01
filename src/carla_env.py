@@ -1,9 +1,10 @@
 """
-Entorno Gymnasium para CARLA con PPO + CnnPolicy (Stable Baselines3).
+Entorno Gymnasium para CARLA con PPO + MultiInputPolicy (Stable Baselines3).
 
 Características principales:
   - Modo síncrono con fixed_delta_seconds (determinismo para RL)
   - Acciones discretas: 9 combinaciones de steer × throttle/brake
+  - Observación Dict: imagen RGB + vector auxiliar con mediciones
   - Función de recompensa por componentes: velocidad, orientación, carril, colisión, offroad
   - Spawn con try_spawn_actor() y reintentos
   - Tráfico NPC persistente entre episodios
@@ -39,13 +40,18 @@ import carla
 #  CONFIGURACIÓN
 # ═══════════════════════════════════════════════════════════════════
 
+# Resolución del sensor CARLA
 IM_WIDTH = 640          
 IM_HEIGHT = 480        
 IM_CHANNELS = 3         
 FOV = 110    
 
+# Resolución de la observación
 OBS_WIDTH = 160
 OBS_HEIGHT = 120
+
+# [speed, collision, orientation, distance_to_center, angle_diff, is_offroad, stall_ratio]
+VECTOR_OBS_SIZE = 7
 
 FIXED_DELTA = 0.05      
 MAX_STEPS = 2000       
@@ -69,7 +75,6 @@ MAX_SPAWN_RETRIES = 50
 PREVIEW_WIDTH = 640
 PREVIEW_HEIGHT = 480
 
-# Aciones discretas
 DISCRETE_ACTIONS = {
     0: (-0.3, 0.6, 0.0),   # Izquierda + aceleración media
     1: ( 0.0, 0.6, 0.0),   # Recto + aceleración media
@@ -83,23 +88,26 @@ DISCRETE_ACTIONS = {
 }
 
 class CarlaEnv(gym.Env):
-    """
-    Implementa la interfaz estándar de Gymnasium:
-      - observation_space: imagen RGB de shape (H, W, 3) con dtype uint8
-      - action_space: Discrete(9) — 9 combinaciones fijas de steer/throttle/brake
-      - reset(): reinicia episodio, retorna (observación, info)
-      - step(action): ejecuta acción, retorna (obs, reward, terminated, truncated, info)
-    """
+
+    # Implementa la interfaz estándar de Gymnasium con observación Dict
 
     metadata = {"render_modes": ["human"]}
 
     def __init__(self, show_preview=False):
         super().__init__()
-        self.observation_space = spaces.Box(
-            low=0, high=255,
-            shape=(OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS),
-            dtype=np.uint8,
-        )
+
+        self.observation_space = spaces.Dict({
+            "image": spaces.Box(
+                low=0, high=255,
+                shape=(OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS),
+                dtype=np.uint8,
+            ),
+            "vector": spaces.Box(
+                low=-1.0, high=2.0,
+                shape=(VECTOR_OBS_SIZE,),
+                dtype=np.float32,
+            ),
+        })
         self.action_space = spaces.Discrete(len(DISCRETE_ACTIONS))
 
         self.show_preview = show_preview
@@ -199,7 +207,6 @@ class CarlaEnv(gym.Env):
                 self.actor_list.append(self.vehicle)
                 return
 
-        # Si ningún punto funcionó, lanzar error descriptivo
         raise RuntimeError(
             f"No se pudo spawnear el vehículo después de {retries} intentos. "
             "Posiblemente hay demasiados actores ocupando los spawn points."
@@ -239,7 +246,7 @@ class CarlaEnv(gym.Env):
         array = array.reshape((IM_HEIGHT, IM_WIDTH, 4))       # BGRA a 640×480
         bgr = array[:, :, :3]                                  # Quitar canal alpha
         # cv2.resize(src, (ancho, alto)) — redimensiona la imagen al tamaño destino
-        # INTER_AREA es el mejor método para reducir tamaño (promedia píxeles)
+        # INTER_AREA es el mejor método para reducir tamaño (promedia píxeles vecinos)
         self.front_camera = cv2.resize(bgr, (OBS_WIDTH, OBS_HEIGHT), interpolation=cv2.INTER_AREA)
 
     def _on_collision(self, event):
@@ -252,7 +259,69 @@ class CarlaEnv(gym.Env):
         v = self.vehicle.get_velocity()
         return 3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2)
 
-    # Funcion de recompensa
+    def _get_vector_obs(self):
+        """
+        Construye el vector auxiliar de mediciones normalizadas.
+        """
+        speed = self._get_speed_kmh()
+        vehicle_transform = self.vehicle.get_transform()
+        waypoint = self.map.get_waypoint(
+            vehicle_transform.location, project_to_road=True
+        )
+
+        # Velocidad normalizada
+        speed_norm = np.clip(speed / TARGET_SPEED_KMH, 0.0, 2.0)
+
+        # Flag de colisión (binario)
+        collision = 1.0 if self.collision_flag else 0.0
+
+        # Orientación relativa al carril
+        veh_fwd = vehicle_transform.get_forward_vector()
+        wp_fwd = waypoint.transform.get_forward_vector()
+        orientation = veh_fwd.x * wp_fwd.x + veh_fwd.y * wp_fwd.y
+
+        # Distancia lateral al centro del carril
+        dist_to_center = vehicle_transform.location.distance(waypoint.transform.location)
+        dist_to_center_norm = np.clip(dist_to_center / 3.0, 0.0, 1.0)
+
+        # Diferencia angular entre vehículo y carril
+        veh_yaw = math.atan2(veh_fwd.y, veh_fwd.x)
+        wp_yaw = math.atan2(wp_fwd.y, wp_fwd.x)
+        angle_diff = veh_yaw - wp_yaw
+        angle_diff = math.atan2(math.sin(angle_diff), math.cos(angle_diff))
+        angle_diff_norm = angle_diff / math.pi
+
+        # Flag de offroad
+        is_offroad = 0.0 if waypoint.lane_type == carla.LaneType.Driving else 1.0
+
+        # Ratio de stall
+        stall_ratio = np.clip(self.stall_steps / 30.0, 0.0, 1.0)
+
+        return np.array([
+            speed_norm,
+            collision,
+            orientation,
+            dist_to_center_norm,
+            angle_diff_norm,
+            is_offroad,
+            stall_ratio,
+        ], dtype=np.float32)
+
+    def _build_obs(self):
+        """
+        Construye la observación completa como un dict con "image" y "vector".
+        Este es el formato que espera MultiInputPolicy de SB3.
+        """
+        if self.front_camera is not None:
+            image = self.front_camera.copy()
+        else:
+            image = np.zeros((OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8)
+
+        vector = self._get_vector_obs()
+
+        return {"image": image, "vector": vector}
+
+    # Función de recompensa
     def _compute_reward(self):
         """
         Componentes:
@@ -338,6 +407,7 @@ class CarlaEnv(gym.Env):
             'r_offroad': r_offroad,
         }
         return total, components, terminated
+
     def _log_rewards(self, components, total):
         """
         Acumula componentes de recompensa y escribe promedios al CSV
@@ -376,7 +446,7 @@ class CarlaEnv(gym.Env):
           1. Destruye actores del episodio anterior (vehículo ego + sensores)
           2. Spawnea vehículo, cámara y sensores
           3. Espera al primer frame de cámara
-          4. Retorna (observación, info) — formato Gymnasium v26+
+          4. Retorna (observación_dict, info) — formato Gymnasium v26+
         """
         super().reset(seed=seed)
 
@@ -418,24 +488,20 @@ class CarlaEnv(gym.Env):
             wait += 1
 
         if self.front_camera is None:
-            # Fallback: imagen negra si la cámara no respondió
             self.front_camera = np.zeros(
                 (OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8
             )
 
-        return self.front_camera.copy(), {}
+        return self._build_obs(), {}
 
     def step(self, action):
         """
         Ejecuta una acción discreta en el simulador.
 
-        Parámetros:
-            action (int): Índice de la acción (0-8) del diccionario DISCRETE_ACTIONS.
-
         Retorna (formato Gymnasium):
-            observation: imagen RGB (H, W, 3) uint8
+            observation: dict con "image" y "vector"
             reward: float — recompensa total del step
-            terminated: True si hubo colisión
+            terminated: True si hubo colisión o stall
             truncated: True si se alcanzó MAX_STEPS
             info: dict con componentes de reward y velocidad
         """
@@ -448,17 +514,14 @@ class CarlaEnv(gym.Env):
             carla.VehicleControl(throttle=throttle, steer=steer, brake=brake)
         )
 
-        # 2. Avanzar simulación (exactamente FIXED_DELTA segundos)
+        # 2. Avanzar simulación
         self.world.tick()
 
-        # 3. Obtener observación
-        if self.front_camera is not None:
-            obs = self.front_camera.copy()
-        else:
-            obs = np.zeros((OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8)
-
-        # 4. Calcular recompensa
+        # 3. Calcular recompensa (antes de construir obs para que stall_steps esté actualizado)
         reward, components, terminated = self._compute_reward()
+
+        # 4. Construir observación dict
+        obs = self._build_obs()
 
         # 5. Verificar truncado por tiempo
         truncated = self.step_count >= MAX_STEPS
@@ -469,7 +532,7 @@ class CarlaEnv(gym.Env):
 
         # 7. Preview (opcional)
         if self.show_preview:
-            self._render_preview(obs, action, reward)
+            self._render_preview(obs["image"], action, reward)
 
         info = {
             "speed_kmh": self._get_speed_kmh(),
@@ -478,12 +541,12 @@ class CarlaEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
 
-    def _render_preview(self, obs, action, reward):
+    def _render_preview(self, obs_image, action, reward):
         """
         Muestra la imagen de la cámara escalada con overlay de información.
         """
         display = cv2.resize(
-            obs, (PREVIEW_WIDTH, PREVIEW_HEIGHT),
+            obs_image, (PREVIEW_WIDTH, PREVIEW_HEIGHT),
             interpolation=cv2.INTER_NEAREST,
         )
 

@@ -1,5 +1,5 @@
 """
-Entrenamiento de PPO + CnnPolicy en CARLA.
+Entrenamiento de PPO + MultiInputPolicy en CARLA.
 
 Uso:
     1. Iniciar CARLA:
@@ -58,28 +58,18 @@ def find_latest_checkpoint(checkpoint_dir):
 
 def create_model(env):
     """
-      - CnnPolicy: red convolucional que recibe imágenes y las procesa
-        con capas Conv2D antes de las capas de la política/valor.
-      - n_steps=2048: cantidad de steps a recolectar antes de cada update.
-        PPO acumula experiencia en un buffer y luego hace varias pasadas
-        (n_epochs) sobre esa experiencia para actualizar la red.
-      - batch_size=64: tamaño de los mini-batches dentro de cada epoch.
-      - n_epochs=10: cuántas veces se recorre el buffer completo por update.
-      - gamma=0.99: factor de descuento. Valores cercanos a 1 hacen que el
-        agente valore más las recompensas futuras.
-      - clip_range=0.2: rango de clipping de PPO. Limita cuánto puede cambiar
-        la política en un solo update (estabilidad del entrenamiento).
-      - ent_coef=0.01: coeficiente de entropía. Incentiva exploración al
-        penalizar políticas muy deterministas.
-      - target_kl=0.2: si la divergencia KL entre la política vieja y la
-        nueva supera este umbral, se detiene el update early. Previene
-        cambios demasiado drásticos en la política.
+      - MultiInputPolicy: política que acepta observaciones Dict.
+        Internamente usa un CombinedExtractor que:
+          1. Procesa la clave "image" con capas convolucionales (NatureCNN)
+          2. Procesa la clave "vector" con capas fully-connected
+          3. Concatena ambas representaciones
+          4. Alimenta las cabezas de política y valor
     """
     return PPO(
-        "CnnPolicy",
+        "MultiInputPolicy",      # <-- Antes era "CnnPolicy"
         env,
         learning_rate=3e-4,
-        n_steps=512,          # Era 2048 → ahora 512 para rollouts más cortos
+        n_steps=512,
         batch_size=64,
         n_epochs=10,
         gamma=0.99,
@@ -136,7 +126,7 @@ def main():
 
     try:
         print(f"\n{'='*60}")
-        print(f"  Iniciando entrenamiento PPO")
+        print(f"  Iniciando entrenamiento PPO + MultiInputPolicy")
         print(f"  Total: {TOTAL_TIMESTEPS} steps")
         print(f"  n_steps: {model.n_steps} | batch_size: {model.batch_size}")
         print(f"  target_kl: {model.target_kl}")
