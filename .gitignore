@@ -1,5 +1,6 @@
 # Checkpoints y modelos
 src/checkpoints/
+src/__pycache__/
 src/models/
 checkpoints/
 tensorboard/
