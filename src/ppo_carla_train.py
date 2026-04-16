@@ -70,7 +70,7 @@ def main():
     os.makedirs("models", exist_ok=True)
 
     env = DummyVecEnv([lambda: Monitor(CarlaEnv(show_preview=args.preview))])
-    model = create_model(env)
+    resumed = False
 
     if not args.fresh:
         result = find_latest_checkpoint(CHECKPOINT_DIR)
@@ -78,15 +78,19 @@ def main():
             path, steps = result
             print(f"=== Checkpoint: {path} ({steps} steps) ===")
             try:
-                loaded = PPO.load(path)
-                model.set_parameters(loaded.get_parameters(), exact_match=True)
-                del loaded
-                print("=== Pesos cargados ===")
+                # PPO.load() restaura num_timesteps, optimizer state, y pesos.
+                # A diferencia de set_parameters() que solo copia pesos.
+                model = PPO.load(path, env=env, tensorboard_log=TENSORBOARD_DIR)
+                resumed = True
+                print(f"=== Modelo cargado, num_timesteps={model.num_timesteps} ===")
             except Exception as e:
                 print(f"=== Error al cargar: {e}. Usá --fresh ===")
                 try: env.close()
                 except: pass
                 os.kill(os.getpid(), signal.SIGTERM)
+
+    if not resumed:
+        model = create_model(env)
 
     checkpoint_cb = CheckpointCallback(
         save_freq=CHECKPOINT_FREQ, save_path=CHECKPOINT_DIR,
@@ -107,10 +111,13 @@ def main():
             print(f"  Test step {i}: reward={reward[0]:.2f}")
         print("=== Env OK, arrancando ===")
 
+        remaining = TOTAL_TIMESTEPS - model.num_timesteps
+        print(f"  Steps restantes: {remaining}")
+
         model.learn(
-            total_timesteps=TOTAL_TIMESTEPS,
+            total_timesteps=remaining,
             callback=checkpoint_cb,
-            reset_num_timesteps=True,
+            reset_num_timesteps=False,   # NO reinicia el contador → TensorBoard continúa
             tb_log_name="M1_aditiva_simple",
             progress_bar=True,
         )
