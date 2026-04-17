@@ -20,7 +20,7 @@ TOTAL_TIMESTEPS = 600_000
 CHECKPOINT_FREQ = 20_000
 CHECKPOINT_DIR = "checkpoints/"
 TENSORBOARD_DIR = "tensorboard/"
-FINAL_MODEL_PATH = "models/ppo_carla_final"
+FINAL_MODEL_PATH = "models/ppo_carla_final_V2"
 
 
 def find_latest_checkpoint(checkpoint_dir):
