@@ -1,13 +1,15 @@
 # Checkpoints y modelos
-src/checkpoints/
+src/checkpoints_M2/
 src/__pycache__/
 src/models/
 checkpoints/
+checkpoints_M2/
 tensorboard/
 
 # Logs de entrenamiento
 src/tensorboard/
 src/logs/
+logs/
 
 # Python cache
 __pycache__/

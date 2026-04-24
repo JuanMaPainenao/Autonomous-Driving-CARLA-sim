@@ -1,12 +1,12 @@
 """
-Entrenamiento PPO + MultiInputPolicy — Modelo 1: Reward Aditiva Simple.
-Hiperparámetros compartidos con Modelo 2 y 3 para comparación justa.
+Entrenamiento PPO + MultiInputPolicy — Modelo 2: Reward Aditiva con Sentido de Marcha.
+Hiperparámetros IDÉNTICOS a Modelo 1 y Modelo 3 (comparación justa).
 
 Uso:
     python3.10 ppo_carla_train.py                # entrenar
-    python3.10 ppo_carla_train.py --preview       # con ventana
-    python3.10 ppo_carla_train.py --fresh         # ignorar checkpoints
-    tensorboard --logdir=./tensorboard/           # ver curvas
+    python3.10 ppo_carla_train.py --preview      # con ventana
+    python3.10 ppo_carla_train.py --fresh        # ignorar checkpoints
+    tensorboard --logdir=./tensorboard/          # ver curvas
 """
 
 import os, glob, argparse, signal
@@ -18,9 +18,11 @@ from carla_env import CarlaEnv
 
 TOTAL_TIMESTEPS = 600_000
 CHECKPOINT_FREQ = 20_000
-CHECKPOINT_DIR = "checkpoints/"
-TENSORBOARD_DIR = "tensorboard/"
-FINAL_MODEL_PATH = "models/ppo_carla_final_V2"
+
+# Carpetas SEPARADAS de M1 para no mezclar checkpoints ni logs.
+CHECKPOINT_DIR = "checkpoints_M2/"
+TENSORBOARD_DIR = "tensorboard/"  # Mismo directorio raíz para comparar lado a lado.
+FINAL_MODEL_PATH = "models/ppo_carla_M2_final"
 
 
 def find_latest_checkpoint(checkpoint_dir):
@@ -37,7 +39,7 @@ def find_latest_checkpoint(checkpoint_dir):
 
 def create_model(env):
     """
-    PPO con hiperparámetros robustos (fijos para los 3 modelos).
+    PPO con hiperparámetros IDÉNTICOS a M1 (comparación justa).
     MultiInputPolicy: NatureCNN para imagen + flatten para vector.
     """
     return PPO(
@@ -60,7 +62,7 @@ def create_model(env):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Entrenar PPO — Modelo 1")
+    parser = argparse.ArgumentParser(description="Entrenar PPO — Modelo 2")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--fresh", action="store_true")
     args = parser.parse_args()
@@ -99,7 +101,7 @@ def main():
 
     try:
         print(f"\n{'='*50}")
-        print(f"  Modelo 1: Reward Aditiva Simple")
+        print(f"  Modelo 2: Reward Aditiva con Sentido de Marcha")
         print(f"  Steps: {TOTAL_TIMESTEPS} | n_steps: 1024 | batch: 128")
         print(f"  epochs: 5 | lr: 3e-4 | ent_coef: 0.01")
         print(f"  TensorBoard: tensorboard --logdir={TENSORBOARD_DIR}")
@@ -118,7 +120,7 @@ def main():
             total_timesteps=remaining,
             callback=checkpoint_cb,
             reset_num_timesteps=False,   # NO reinicia el contador → TensorBoard continúa
-            tb_log_name="M1_aditiva_simple",
+            tb_log_name="M2_aditiva_sentido",
             progress_bar=True,
         )
 
