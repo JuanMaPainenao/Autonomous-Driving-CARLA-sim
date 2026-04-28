@@ -9,7 +9,9 @@ class CoppeliaEnv(gym.Env):
     SENSOR_MAX_RANGE = 1.0
     SENSOR_INDICES = [2, 3, 4, 5]  #los 4 sensores frontales
     MAX_EPISODE_STEPS = 500
-    COLLISION_THRESHOLD = 0.1
+    # COLLISION_THRESHOLD = 0.1
+    POSITION_RANDOM_RANGE = 0.5  # ±0.5 m en x, y
+    ORIENTATION_RANDOM_RANGE = np.pi  # ±π en yaw (cualquier dirección)
 
 
 
@@ -21,9 +23,8 @@ class CoppeliaEnv(gym.Env):
             f"Modo de recompensa inválido: {reward_mode}. Debe ser R1, R2 o R3."
         self.reward_mode = reward_mode
 
-        self.client = RepoteAPIClient()
+        self.client = RemoteAPIClient()
         self.sim = self.client.require('sim')
-
 
         self.sim.stopSimulation()
 
@@ -40,6 +41,14 @@ class CoppeliaEnv(gym.Env):
         for idx in self.SENSOR_INDICES:
             handle = self.sim.getObject(f'/PioneerP3DX/ultrasonicSensor[{idx}]')
             self.sensors.append(handle)
+
+        self.robot_collection = self.sim.createCollection(0)
+        self.sim.addItemToCollection(
+            self.robot_collection,
+            self.sim.handle_tree,  # incluir todo el árbol bajo el handle
+            self.robot,
+            0
+        )
 
         self.initial_position = self.sim.getObjectPosition(self.robot, -1)
         self.initial_orientation = self.sim.getObjectOrientation(self.robot, -1)
@@ -66,19 +75,29 @@ class CoppeliaEnv(gym.Env):
         self.sim.stopSimulation()
         while self.sim.getSimulationState() != self.sim.simulation_stopped:
             pass
-        
-        self.sim.setObjectPosition(self.robot, -1, self.initial_position)
-        self.sim.setObjectOrientation(self.robot, -1, self.initial_orientation)
 
+        # Randomizar pose inicial
+        random_position = self._sample_random_position()
+        random_orientation = self._sample_random_orientation()
+
+        self.sim.setObjectPosition(self.robot, -1, random_position)
+        self.sim.setObjectOrientation(self.robot, -1, random_orientation)
+
+        # Resetear motores
+        self.sim.setJointTargetVelocity(self.left_motor, 0.0)
+        self.sim.setJointTargetVelocity(self.right_motor, 0.0)
+
+        # Resetear estado interno
         self.prev_action = 0
         self.step_count = 0
 
+        # Arrancar sim
         self.sim.startSimulation()
-
         self.client.step()
 
         observation = self._get_observation()
         info = {}
+        return observation, info
 
     def _get_observation(self):
         sensor_readings = []
@@ -105,8 +124,25 @@ class CoppeliaEnv(gym.Env):
 
         return obs
 
-    
-        return observation, info
+    def _sample_random_position(self):
+        """Genera una posición aleatoria cerca de la pose inicial."""
+        x = self.initial_position[0] + self.np_random.uniform(
+            -self.POSITION_RANDOM_RANGE, self.POSITION_RANDOM_RANGE
+        )
+        y = self.initial_position[1] + self.np_random.uniform(
+            -self.POSITION_RANDOM_RANGE, self.POSITION_RANDOM_RANGE
+        )
+        z = self.initial_position[2]  # mantener altura original
+        return [x, y, z]
+
+    def _sample_random_orientation(self):
+        """Genera una orientación aleatoria (solo varía yaw)."""
+        roll = self.initial_orientation[0]
+        pitch = self.initial_orientation[1]
+        yaw = self.np_random.uniform(
+            -self.ORIENTATION_RANDOM_RANGE, self.ORIENTATION_RANDOM_RANGE
+        )
+        return [roll, pitch, yaw]
 
     def step(self, action):
         left_vel, right_vel = self._action_to_motor_velocities(action)
@@ -117,16 +153,24 @@ class CoppeliaEnv(gym.Env):
         self.client.step()
 
         observation = self._get_observation()
-        reward, reward_components = self._compute_reward(observation)
 
-        terminated = False
+        # Chequear colisión real (motor de física)
+        collision = self._check_collision()
 
+        # Calcular reward
+        reward, reward_components = self._compute_reward(observation, collision)
+
+        # Terminación: el episodio termina si hay colisión
+        terminated = collision
+
+        # Truncamiento: corte por timeout
         self.step_count += 1
         truncated = self.step_count >= self.MAX_EPISODE_STEPS
 
         self.prev_action = action
 
         info = dict(reward_components)
+        info['collision'] = collision  # útil para logging
         return observation, reward, terminated, truncated, info
 
     def _action_to_motor_velocities(self, action):
@@ -140,10 +184,9 @@ class CoppeliaEnv(gym.Env):
             raise ValueError(f'Acción inválida: {action}')
 
 
-    def _compute_reward(self, observation):
+    def _compute_reward(self,    observation, collision):
         s2, s3, s4, s5, v_norm, _ = observation
         d_min = min(s2, s3, s4, s5)
-        collision = d_min < self.COLLISION_THRESHOLD
 
         if self.reward_mode == 'R1':
             return self._reward_r1(v_norm, collision)
@@ -202,6 +245,13 @@ class CoppeliaEnv(gym.Env):
         }
         return reward, components
 
+    def _check_collision(self):
+        """Chequea colisión real entre el robot y cualquier otro objeto."""
+        result, _ = self.sim.checkCollision(
+            self.robot_collection,
+            self.sim.handle_all
+        )
+        return result == 1
 
     def close(self):
         pass
