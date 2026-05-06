@@ -198,14 +198,12 @@ class CoppeliaEnv(gym.Env):
     def _reward_r1(self, v_norm, collision):
         K_V = 1.0
         K_COL = 100.0
-
         r_velocity = K_V * v_norm
         r_collision = -K_COL if collision else 0.0
-
-        reward = r_velocity + r_collision
+        reward = float(r_velocity + r_collision)  # ← cast a float nativo
         components = {
-            'r_velocity': r_velocity,
-            'r_collision': r_collision
+            'r_velocity': float(r_velocity),
+            'r_collision': float(r_collision),
         }
         return reward, components
 
@@ -214,34 +212,29 @@ class CoppeliaEnv(gym.Env):
         K_COL = 100.0
         K_PROX = 5.0
         D_SAFE = 0.3
-
         r_velocity = K_V * v_norm
         r_collision = -K_COL if collision else 0.0
         r_proximity = -K_PROX * max(0.0, D_SAFE - d_min)
-
-        reward = r_velocity + r_collision + r_proximity
+        reward = float(r_velocity + r_collision + r_proximity)
         components = {
-            'r_velocity': r_velocity,
-            'r_collision': r_collision,
-            'r_proximity': r_proximity
+            'r_velocity': float(r_velocity),
+            'r_collision': float(r_collision),
+            'r_proximity': float(r_proximity),
         }
-
         return reward, components
 
     def _reward_r3(self, v_norm, collision, d_min):
         K_V = 1.0
         K_COL = 100.0
         K_CLEAR = 2.0
-
         r_velocity = K_V * v_norm
         r_collision = -K_COL if collision else 0.0
         r_clearance = K_CLEAR * d_min
-
-        reward = r_velocity + r_collision + r_clearance
+        reward = float(r_velocity + r_collision + r_clearance)
         components = {
-            'r_velocity': r_velocity,
-            'r_collision': r_collision,
-            'r_clearance': r_clearance
+            'r_velocity': float(r_velocity),
+            'r_collision': float(r_collision),
+            'r_clearance': float(r_clearance),
         }
         return reward, components
 
@@ -254,4 +247,4 @@ class CoppeliaEnv(gym.Env):
         return result == 1
 
     def close(self):
-        pass
+        self.sim.stopSimulation()
