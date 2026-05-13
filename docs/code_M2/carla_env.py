@@ -1,19 +1,16 @@
 """
-Entorno Gymnasium para CARLA — Modelo 3: Reward Multiplicativa Jerárquica.
+Entorno Gymnasium para CARLA — Modelo 2: Reward Aditiva con Sentido de Marcha.
 
-Cambios vs Modelo 2 (solo reward; todo lo demás idéntico):
-  - Se introduce r_safety_gate ∈ [0, 1] como producto de 4 factores suaves:
-    g_orientation × g_lane × g_speed × g_direction.
-  - r_progress y r_lane_center se MULTIPLICAN por el gate. Si la seguridad
-    colapsa, el reward positivo colapsa con ella → no se puede compensar
-    inseguridad con progreso (core de la hipótesis del paper).
-  - r_speed queda FUERA del gate (señal mínima siempre presente).
-  - Las penalidades terminales (colisión, offroad, lane, stall, wrong_way)
-    NO se modulan: castigo pleno sin importar el gate.
+Cambios vs Modelo 1 (solo reward; todo lo demás idéntico):
+  - r_progress ahora es "progress con sentido": distancia * vel_dot.
+    Yendo correcto → suma. En contramano → resta. De costado → ~0.
+  - r_orientation ahora usa vel_dot (sentido real de marcha), no dot de forwards.
+  - Se agrega r_wrong_way: penalización constante si el auto va en contramano.
+  - Se agrega r_lane_center: señal densa por mantenerse centrado en el carril.
+  - Magnitudes de penalidades (colisión, offroad, lane, stall) sin cambios.
 
-Vector de observación: 10 valores (idéntico a M1/M2, NO se toca).
-Acciones: 9 discretas (idéntico a M1/M2, NO se toca).
-Hiperparámetros del PPO: idénticos a M1/M2 (comparación justa).
+Vector de observación: 10 valores (idéntico a M1, NO se toca).
+Acciones: 9 discretas (idéntico a M1, NO se toca).
 """
 
 import os, sys, glob, random, math, csv
@@ -43,23 +40,19 @@ FIXED_DELTA = 0.05
 MAX_STEPS = 2000
 TARGET_SPEED_KMH = 30
 
-# ── Reward multiplicativa jerárquica (Modelo 3) ──
-R_SPEED_MAX = 1.0                     # Fuera del gate (señal mínima siempre).
-R_PROGRESS_PER_METER = 1.0            # Modulado por gate.
-R_LANE_CENTER_MAX = 0.5               # Modulado por gate.
-R_WRONG_WAY_PENALTY = -2.0            # Penalidad directa, no modulada.
+# ── Reward aditiva con sentido de marcha (Modelo 2) ──
+R_SPEED_MAX = 1.0
+R_ORIENTATION_MAX = 1.0
+R_PROGRESS_PER_METER = 1.0            # Ahora multiplicado por vel_dot
+R_LANE_CENTER_MAX = 0.5               # NUEVO: señal densa por ir centrado
+R_WRONG_WAY_PENALTY = -2.0            # NUEVO: castigo por step en contramano
 
-# Parámetros del safety gate (escalas de tolerancia para cada factor).
-GATE_LANE_TOLERANCE = 1.5             # metros: a 1.5m del centro, g_lane = 0.
-GATE_SPEED_TOLERANCE = 25.0           # km/h: ancho de la gaussiana de velocidad.
-GATE_ORIENT_SHARPNESS = 1.0           # exponente: más alto = más severo con desalineación.
-
-# ── Penalidades (idénticas a M1/M2) ──
+# ── Penalidades (idénticas a M1) ──
 R_LANE_PENALTY = -5.0
 R_COLLISION_PENALTY = -10.0
 R_OFFROAD_PENALTY = -5.0
 
-# ── Stall (idéntico a M1/M2) ──
+# ── Stall (idéntico a M1) ──
 R_STALL_PENALTY = -5.0
 STALL_TERMINATE_STEPS = 30
 
@@ -107,30 +100,28 @@ class CarlaEnv(gym.Env):
         self.prev_steer = 0.0
         self.prev_location = None
 
-        # Logging: agrego el gate y sus 4 factores para poder graficarlos en TensorBoard.
+        # Logging (agrego r_wrong_way y r_lane_center)
         self.global_step = 0
         self._reward_accum = {
-            'r_speed': 0.0, 'r_progress': 0.0, 'r_lane_center': 0.0,
-            'r_wrong_way': 0.0, 'r_lane': 0.0, 'r_collision': 0.0,
-            'r_offroad': 0.0, 'r_stall': 0.0, 'r_total': 0.0,
-            'gate': 0.0, 'g_orient': 0.0, 'g_lane': 0.0,
-            'g_speed': 0.0, 'g_direction': 0.0,
+            'r_speed': 0.0, 'r_orientation': 0.0, 'r_progress': 0.0,
+            'r_lane_center': 0.0, 'r_wrong_way': 0.0,
+            'r_lane': 0.0, 'r_collision': 0.0, 'r_offroad': 0.0,
+            'r_stall': 0.0, 'r_total': 0.0,
         }
         self._accum_count = 0
         self._log_freq = 50
 
         os.makedirs("logs", exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_path = f"logs/reward_log_M3_{ts}.csv"
+        self.log_path = f"logs/reward_log_M2_{ts}.csv"
         self._csv_file = open(self.log_path, 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
             'global_step', 'episode', 'step_in_ep',
-            'avg_r_speed', 'avg_r_progress', 'avg_r_lane_center',
-            'avg_r_wrong_way', 'avg_r_lane', 'avg_r_collision',
-            'avg_r_offroad', 'avg_r_stall', 'avg_r_total',
-            'avg_gate', 'avg_g_orient', 'avg_g_lane', 'avg_g_speed', 'avg_g_direction',
-            'speed_kmh',
+            'avg_r_speed', 'avg_r_orientation', 'avg_r_progress',
+            'avg_r_lane_center', 'avg_r_wrong_way',
+            'avg_r_lane', 'avg_r_collision', 'avg_r_offroad',
+            'avg_r_stall', 'avg_r_total', 'speed_kmh',
         ])
 
         # Conexión a CARLA
@@ -259,7 +250,7 @@ class CarlaEnv(gym.Env):
     # ── Observación ──
 
     def _get_vector_obs(self):
-        """Vector de 10 mediciones normalizadas (IDÉNTICO a M1/M2)."""
+        """Vector de 10 mediciones normalizadas (IDÉNTICO a M1)."""
         speed = self._get_speed_kmh()
         vt = self.vehicle.get_transform()
         wp = self.map.get_waypoint(vt.location, project_to_road=True)
@@ -292,57 +283,13 @@ class CarlaEnv(gym.Env):
         img = self.front_camera.copy() if self.front_camera is not None else np.zeros((OBS_HEIGHT, OBS_WIDTH, IM_CHANNELS), dtype=np.uint8)
         return {"image": img, "vector": self._get_vector_obs()}
 
-    # ── Safety Gate (Modelo 3) ──
-
-    def _compute_safety_gate(self, speed, vel_dot, dist_to_center, orientation, is_wrong):
-        """
-        Calcula el gate de seguridad como producto de 4 factores ∈ [0, 1].
-        El gate modula r_progress y r_lane_center: si cualquier factor cae a 0,
-        todo el reward positivo modulado se anula.
-
-        Factores:
-          g_orientation: alineación vehículo-carril (orientation = dot de forwards).
-            (orientation+1)/2 mapea [-1,1] → [0,1]. Elevado a GATE_ORIENT_SHARPNESS.
-          g_lane: cercanía al centro del carril. Lineal: 1 en centro, 0 a tolerance.
-          g_speed: campana gaussiana centrada en TARGET_SPEED. Penaliza ir muy lento
-            o muy rápido.
-          g_direction: 1 si va en sentido correcto, 0 si va en contramano.
-            Usa vel_dot (sentido REAL de marcha), no orientation (forward del auto).
-        """
-        # g_orientation: penaliza desalineación del vehículo con el carril.
-        # math.pow(x, n) = x^n. Con sharpness=1.0 es lineal; >1.0 castiga más fuerte
-        # cualquier desalineación pequeña.
-        g_orient = math.pow(max(0.0, (orientation + 1.0) / 2.0), GATE_ORIENT_SHARPNESS)
-
-        # g_lane: 1 en el centro, decae lineal a 0 a GATE_LANE_TOLERANCE metros.
-        g_lane = max(0.0, 1.0 - dist_to_center / GATE_LANE_TOLERANCE)
-
-        # g_speed: campana gaussiana e^(-((v-target)/σ)²), vale 1 en TARGET_SPEED.
-        # Penaliza tanto velocidades muy bajas como muy altas.
-        g_speed = math.exp(-((speed - TARGET_SPEED_KMH) / GATE_SPEED_TOLERANCE) ** 2)
-
-        # g_direction: corte duro (es la única condición binaria del gate).
-        # Si va en contramano, todo el reward modulado se anula.
-        # Detenido (vel_dot ≈ 0): vale 1, no penaliza estar quieto vía gate
-        # (la quietud se castiga vía r_stall).
-        g_direction = 0.0 if is_wrong else 1.0
-
-        gate = g_orient * g_lane * g_speed * g_direction
-        return gate, g_orient, g_lane, g_speed, g_direction
-
-    # ── Reward (Modelo 3) ──
+    # ── Reward (Modelo 2) ──
 
     def _compute_reward(self, action):
         """
-        Modelo 3 — Reward multiplicativa jerárquica.
-
-        r_total = r_safety_gate × (r_progress + r_lane_center)
-                + r_speed
-                + r_wrong_way + r_lane + r_collision + r_offroad + r_stall
-
-        El gate modula solo las recompensas positivas de progreso/centrado.
-        r_speed queda fuera (señal mínima siempre presente).
-        Las penalidades terminales no se modulan: castigo pleno siempre.
+        Modelo 2 — Reward aditiva con sentido de marcha.
+        r_total = r_speed + r_orientation + r_progress + r_lane_center + r_wrong_way
+                + r_lane + r_collision + r_offroad + r_stall
         """
         speed = self._get_speed_kmh()
         terminated = False
@@ -350,53 +297,39 @@ class CarlaEnv(gym.Env):
         vt = self.vehicle.get_transform()
         wp = self.map.get_waypoint(vt.location, project_to_road=True)
         wp_fwd = wp.transform.get_forward_vector()
-        veh_fwd = vt.get_forward_vector()
 
-        # Métricas base (idénticas a M2).
+        # vel_dot: componente de la velocidad en la dirección del carril, en [-1, 1].
+        # +1 yendo perfecto, 0 detenido o de costado, -1 contramano puro.
         is_wrong, vel_dot = self._is_wrong_way(wp_fwd)
         vel_dot = float(np.clip(vel_dot, -1.0, 1.0))
-        orientation = veh_fwd.x * wp_fwd.x + veh_fwd.y * wp_fwd.y
-        dist_to_center = vt.location.distance(wp.transform.location)
 
-        # ── SAFETY GATE ──
-        gate, g_orient, g_lane_factor, g_speed, g_direction = self._compute_safety_gate(
-            speed, vel_dot, dist_to_center, orientation, is_wrong
-        )
-
-        # ── Componentes positivas ──
-
-        # r_speed: gaussiana centrada en TARGET_SPEED. FUERA del gate.
+        # r_speed: gaussiana centrada en TARGET_SPEED (igual a M1).
         # math.exp(x) = e^x. Forma e^(-((x-μ)/σ)²) → campana que vale 1 en μ.
         r_speed = R_SPEED_MAX * math.exp(-((speed - TARGET_SPEED_KMH) / 20.0) ** 2)
 
-        # r_progress: distancia recorrida (escalar). Será modulada por gate.
-        # Diferencia clave vs M2: en M2 multiplicamos por vel_dot para dar sentido;
-        # acá no hace falta porque g_direction ya anula todo si va contramano.
+        # r_orientation: ahora usa vel_dot. Solo premia si se mueve en sentido correcto.
+        # Si está quieto → vel_dot ≈ 0 → r_orientation ≈ 0 (no recompensa la quietud).
+        # Si va en contramano → vel_dot < 0 → max(0, ...) = 0 (no castiga acá, lo hace r_wrong_way).
+        r_orientation = R_ORIENTATION_MAX * max(0.0, vel_dot) if speed > 5.0 else 0.0
+
+        # r_progress con SENTIDO: distancia recorrida * vel_dot.
+        # Yendo correcto: suma. Contramano: resta. De costado: ~0.
         dist = self._get_distance_traveled()
-        r_progress_raw = R_PROGRESS_PER_METER * dist
+        r_progress = R_PROGRESS_PER_METER * dist * vel_dot
 
-        # r_lane_center: señal densa, máxima en el centro. Será modulada por gate.
-        r_lane_center_raw = R_LANE_CENTER_MAX * max(0.0, 1.0 - dist_to_center / 1.5)
+        # r_lane_center: señal densa por ir centrado. dist_to_center ∈ [0, ~3m].
+        # max(0, 1 - d/1.5): vale 1 en el centro, cae linealmente a 0 a 1.5m.
+        dist_to_center = vt.location.distance(wp.transform.location)
+        r_lane_center = R_LANE_CENTER_MAX * max(0.0, 1.0 - dist_to_center / 1.5) if speed > 5.0 else 0.0
 
-        # ── APLICACIÓN DEL GATE ──
-        # Solo modulamos las componentes que dependen de "estar haciendo bien las cosas".
-        # Si el gate cae a 0 (mal alineado, descentrado, muy lento/rápido o contramano),
-        # estas componentes valen 0 sin importar el progreso real.
-        r_progress = gate * r_progress_raw
-        r_lane_center = gate * r_lane_center_raw
-
-        # ── Componentes negativas (NO se modulan) ──
-
-        # r_wrong_way: penalidad directa por ir en contramano.
-        # Aunque g_direction ya anula el reward positivo, mantenemos la penalidad
-        # explícita para que la señal sea aún más fuerte (gradient claro hacia "no".
+        # r_wrong_way: castigo constante mientras esté en contramano.
         r_wrong_way = R_WRONG_WAY_PENALTY if is_wrong else 0.0
 
-        # Steer tracking (igual a M1/M2).
+        # Steer tracking (igual a M1)
         steer, _, _ = DISCRETE_ACTIONS[action]
         self.prev_steer = steer
 
-        # Stall (igual a M1/M2).
+        # Stall (igual a M1)
         if speed < 2.0:
             self.stall_counter += 1
         else:
@@ -407,28 +340,27 @@ class CarlaEnv(gym.Env):
             r_stall = R_STALL_PENALTY
             terminated = True
 
-        # Lane invasion (igual a M1/M2).
+        # Lane invasion (igual a M1)
         r_lane = R_LANE_PENALTY if self.lane_invasion_flag else 0.0
         self.lane_invasion_flag = False
 
-        # Colisión (igual a M1/M2).
+        # Colisión (igual a M1)
         r_collision = 0.0
         if self.collision_flag:
             r_collision = R_COLLISION_PENALTY
             terminated = True
 
-        # Offroad (igual a M1/M2).
+        # Offroad (igual a M1)
         r_offroad = R_OFFROAD_PENALTY if wp.lane_type != carla.LaneType.Driving else 0.0
 
-        total = (r_speed + r_progress + r_lane_center + r_wrong_way
+        total = (r_speed + r_orientation + r_progress + r_lane_center + r_wrong_way
                  + r_stall + r_lane + r_collision + r_offroad)
 
         components = {
-            'r_speed': r_speed, 'r_progress': r_progress, 'r_lane_center': r_lane_center,
+            'r_speed': r_speed, 'r_orientation': r_orientation,
+            'r_progress': r_progress, 'r_lane_center': r_lane_center,
             'r_wrong_way': r_wrong_way, 'r_stall': r_stall,
             'r_lane': r_lane, 'r_collision': r_collision, 'r_offroad': r_offroad,
-            'gate': gate, 'g_orient': g_orient, 'g_lane': g_lane_factor,
-            'g_speed': g_speed, 'g_direction': g_direction,
         }
         return total, components, terminated
 
@@ -447,10 +379,9 @@ class CarlaEnv(gym.Env):
             self._csv_writer.writerow([
                 self.global_step, self.episode_count, self.step_count,
                 *[round(self._reward_accum[k] / n, 4) for k in [
-                    'r_speed', 'r_progress', 'r_lane_center',
-                    'r_wrong_way', 'r_lane', 'r_collision', 'r_offroad',
-                    'r_stall', 'r_total',
-                    'gate', 'g_orient', 'g_lane', 'g_speed', 'g_direction']],
+                    'r_speed', 'r_orientation', 'r_progress',
+                    'r_lane_center', 'r_wrong_way',
+                    'r_lane', 'r_collision', 'r_offroad', 'r_stall', 'r_total']],
                 round(speed, 2),
             ])
             self._csv_file.flush()
@@ -526,8 +457,8 @@ class CarlaEnv(gym.Env):
         speed = self._get_speed_kmh()
         names = {0:"IZQ+Th",1:"RECTO+Th",2:"DER+Th",3:"IZQ+Full",4:"RECTO+Full",5:"DER+Full",6:"IZQ+Freno",7:"RECTO+Freno",8:"DER+Freno"}
         cv2.putText(display, f"Speed:{speed:.0f} | {names.get(action,'?')} | Step:{self.step_count}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-        cv2.putText(display, f"R:{reward:+.2f} | Gate:{components['gate']:.2f} | Ep:{self._ep_reward:+.1f}", (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-        cv2.imshow("CARLA Agent View - M3", display)
+        cv2.putText(display, f"R:{reward:+.2f} | Ep:{self._ep_reward:+.1f}", (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.imshow("CARLA Agent View - M2", display)
         cv2.waitKey(1)
 
     # ── Limpieza ──

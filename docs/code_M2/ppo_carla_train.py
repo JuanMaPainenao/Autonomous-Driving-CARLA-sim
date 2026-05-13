@@ -1,6 +1,6 @@
 """
-Entrenamiento PPO + MultiInputPolicy — Modelo 3: Reward Multiplicativa Jerárquica.
-Hiperparámetros IDÉNTICOS a Modelo 1 y Modelo 2 (comparación justa).
+Entrenamiento PPO + MultiInputPolicy — Modelo 2: Reward Aditiva con Sentido de Marcha.
+Hiperparámetros IDÉNTICOS a Modelo 1 y Modelo 3 (comparación justa).
 
 Uso:
     python3.10 ppo_carla_train.py                # entrenar
@@ -19,10 +19,10 @@ from carla_env import CarlaEnv
 TOTAL_TIMESTEPS = 600_000
 CHECKPOINT_FREQ = 20_000
 
-# Carpetas SEPARADAS de M1 y M2 para no mezclar checkpoints ni logs.
-CHECKPOINT_DIR = "checkpoints_M3/"
+# Carpetas SEPARADAS de M1 para no mezclar checkpoints ni logs.
+CHECKPOINT_DIR = "checkpoints_M2/"
 TENSORBOARD_DIR = "tensorboard/"  # Mismo directorio raíz para comparar lado a lado.
-FINAL_MODEL_PATH = "models/ppo_carla_M3_final"
+FINAL_MODEL_PATH = "models/ppo_carla_M2_final"
 
 
 def find_latest_checkpoint(checkpoint_dir):
@@ -39,7 +39,7 @@ def find_latest_checkpoint(checkpoint_dir):
 
 def create_model(env):
     """
-    PPO con hiperparámetros IDÉNTICOS a M1 y M2 (comparación justa).
+    PPO con hiperparámetros IDÉNTICOS a M1 (comparación justa).
     MultiInputPolicy: NatureCNN para imagen + flatten para vector.
     """
     return PPO(
@@ -62,7 +62,7 @@ def create_model(env):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Entrenar PPO — Modelo 3")
+    parser = argparse.ArgumentParser(description="Entrenar PPO — Modelo 2")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--fresh", action="store_true")
     args = parser.parse_args()
@@ -101,7 +101,7 @@ def main():
 
     try:
         print(f"\n{'='*50}")
-        print(f"  Modelo 3: Reward Multiplicativa Jerárquica")
+        print(f"  Modelo 2: Reward Aditiva con Sentido de Marcha")
         print(f"  Steps: {TOTAL_TIMESTEPS} | n_steps: 1024 | batch: 128")
         print(f"  epochs: 5 | lr: 3e-4 | ent_coef: 0.01")
         print(f"  TensorBoard: tensorboard --logdir={TENSORBOARD_DIR}")
@@ -120,7 +120,7 @@ def main():
             total_timesteps=remaining,
             callback=checkpoint_cb,
             reset_num_timesteps=False,   # NO reinicia el contador → TensorBoard continúa
-            tb_log_name="M3_multiplicativa_jerarquica",
+            tb_log_name="M2_aditiva_sentido",
             progress_bar=True,
         )
 

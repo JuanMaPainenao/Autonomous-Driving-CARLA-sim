@@ -2,6 +2,8 @@
 src/checkpoints_M2/
 src/__pycache__/
 src/models/
+src/checkpoints_M3/
+src/eval/results/
 checkpoints/
 checkpoints_M2/
 tensorboard/
@@ -13,3 +15,11 @@ logs/
 
 # Python cache
 __pycache__/
+.vscode/
+.vscode/
+src/eval/results/
+src/checkpoints_M3/
+src/checkpoints_*/
+src/eval/results/
+__pycache__/
+*.pyc
