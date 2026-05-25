@@ -1,0 +1,7 @@
+Town,Condición,Comparación,Métrica,p-value,Significativo (p<0.05)
+Town10HD,with_npcs,M1 vs M2,distance_m,0.0000,✓
+Town10HD,with_npcs,M1 vs M3,distance_m,0.2538,✗
+Town10HD,with_npcs,M2 vs M3,distance_m,0.0000,✓
+Town10HD,no_npcs,M1 vs M2,distance_m,0.0000,✓
+Town10HD,no_npcs,M1 vs M3,distance_m,0.5103,✗
+Town10HD,no_npcs,M2 vs M3,distance_m,0.0000,✓

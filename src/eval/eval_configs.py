@@ -51,9 +51,11 @@ CONDITIONS = [
 
 # Modelos a evaluar. La key es el nombre corto, el value es el path al .zip.
 MODELS = {
-    "M1": "models/ppo_carla_M1_final.zip",
-    "M2": "models/ppo_carla_M2_final.zip",
-    "M3": "models/ppo_carla_M3_final.zip",
+    "M1":  "models/ppo_carla_M1_final.zip",
+    "M2":  "models/ppo_carla_M2_final.zip",
+    "M3":  "models/ppo_carla_M3_final.zip",
+    "M3A": "models/ppo_carla_M3A_final.zip",
+    "M3B": "models/ppo_carla_M3B_final.zip",
 }
 
 # Directorio raíz para resultados.

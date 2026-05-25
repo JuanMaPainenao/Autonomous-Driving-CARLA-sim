@@ -1,0 +1,8 @@
+Modelo,Town,Condición,Compensation Index,Off-axis driving (%)
+M1,Town10HD,with_npcs,-0.016,36.17
+M1,Town10HD,no_npcs,-0.198,34.05
+M1,Town02,with_npcs,0.356,18.13
+M2,Town10HD,with_npcs,0.113,7.26
+M2,Town10HD,no_npcs,0.123,12.58
+M3,Town10HD,with_npcs,0.27,18.05
+M3,Town10HD,no_npcs,0.326,23.54

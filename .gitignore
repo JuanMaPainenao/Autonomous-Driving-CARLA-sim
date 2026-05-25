@@ -1,25 +1,47 @@
-# Checkpoints y modelos
-src/checkpoints_M2/
-src/__pycache__/
+# ──────────────────────────────────────────────
+#  Modelos entrenados y checkpoints (pesados)
+# ──────────────────────────────────────────────
+models/
 src/models/
-src/checkpoints_M3/
-src/eval/results/
+src/checkpoints_*/
+checkpoints_*/
 checkpoints/
-checkpoints_M2/
-tensorboard/
+*.zip
 
-# Logs de entrenamiento
+# ──────────────────────────────────────────────
+#  Logs de entrenamiento
+# ──────────────────────────────────────────────
 src/tensorboard/
+tensorboard/
 src/logs/
 logs/
+runs/
 
-# Python cache
-__pycache__/
-.vscode/
-.vscode/
-src/eval/results/
-src/checkpoints_M3/
-src/checkpoints_*/
-src/eval/results/
+# ──────────────────────────────────────────────
+#  Resultados de evaluación
+#  (conservamos episodes.csv, ignoramos telemetría pesada)
+# ──────────────────────────────────────────────
+src/eval/results/**/telemetry.csv
+
+# ──────────────────────────────────────────────
+#  Dataset de YOLO (muy pesado)
+# ──────────────────────────────────────────────
+src/dataset/
+dataset/
+
+# ──────────────────────────────────────────────
+#  Python
+# ──────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+
+# ──────────────────────────────────────────────
+#  Editores / Sistema
+# ──────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -1,0 +1,9 @@
+episode,success,termination_cause,episode_steps,survival_time_s,distance_traveled_m,mean_speed_kmh,max_speed_kmh,mean_dist_to_center_m,max_dist_to_center_m,mean_orientation,wrong_way_steps,wrong_way_pct,lane_invasion_count,steering_smoothness
+1,0,stall,104,5.2,10.29,7.16,17.45,0.288,0.389,0.997,0,0.0,0,0.0489
+2,0,collision,55,2.75,9.73,13.02,25.72,1.566,5.533,0.898,0,0.0,4,0.0
+3,0,collision,38,1.9000000000000001,4.49,8.72,19.24,0.507,1.094,0.979,0,0.0,1,0.0
+4,0,stall,30,1.5,0.0,0.04,0.29,0.409,0.41,1.0,0,0.0,0,0.0
+5,0,stall,30,1.5,0.0,0.04,0.29,0.403,0.404,1.0,0,0.0,0,0.0
+6,0,collision,64,3.2,18.3,20.72,37.04,0.863,3.163,0.987,0,0.0,3,0.02277
+7,0,collision,140,7.0,28.29,14.65,35.58,1.127,4.662,0.987,0,0.0,4,0.03624
+8,0,stall,30,1.5,0.0,0.04,0.29,0.245,0.247,1.0,0,0.0,0,0.0
